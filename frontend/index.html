@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Generic Excel Mapper</title>
+  <style>
+    body {
+      font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0;
+      padding: 32px;
+      background: #f6f7f9;
+      color: #1a1a1a;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+
+    .sub {
+      color: #666;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+
+    .panel {
+      background: white;
+      border: 1px solid #e3e3e6;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    input[type=file] {
+      margin-right: 12px;
+    }
+
+    button {
+      background: #2b2b2b;
+      color: white;
+      border: none;
+      padding: 9px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-left: 8px;
+    }
+
+    button:hover {
+      background: #444;
+    }
+
+    button:disabled {
+      background: #bbb;
+      cursor: not-allowed;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #eee;
+      vertical-align: top;
+    }
+
+    th {
+      color: #666;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.03em;
+    }
+
+    select {
+      padding: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      min-width: 160px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.high {
+      background: #d7f5df;
+      color: #1a7d3a;
+    }
+
+    .badge.mid {
+      background: #fdf0c7;
+      color: #8a6300;
+    }
+
+    .badge.low {
+      background: #fbdada;
+      color: #a11d1d;
+    }
+
+    .sev-blocking {
+      background: #fbdada;
+      color: #a11d1d;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .sev-warning {
+      background: #fdf0c7;
+      color: #8a6300;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .method {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+    }
+
+    .samples {
+      color: #888;
+      font-size: 12px;
+    }
+
+    .status {
+      font-size: 13px;
+      color: #555;
+      margin-top: 10px;
+    }
+
+    .error {
+      color: #a11d1d;
+    }
+
+    .summary-line {
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    #issuesTable {
+      max-height: 300px;
+      overflow-y: auto;
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Generic Excel Mapper</h1>
+  <div class="sub">Upload a source file, review the suggested mapping, validate, then export.</div>
+
+  <div class="panel">
+    <input type="file" id="fileInput" accept=".xlsx,.xls" />
+    <button id="analyzeBtn">Analyze</button>
+    <div class="status" id="uploadStatus"></div>
+  </div>
+
+  <div class="panel" id="resultsPanel" style="display:none;">
+    <div style="display:flex; justify-content: space-between; align-items:center;">
+      <div>
+        <strong id="fileNameLabel"></strong>
+        <span class="sub" id="metaLabel"></span>
+      </div>
+      <div>
+        <button id="validateBtn">Validate</button>
+        <button id="exportBtn">Export Mapped File</button>
+      </div>
+    </div>
+    <table id="mappingTable">
+      <thead>
+        <tr>
+          <th>Source Column</th>
+          <th>Sample Values</th>
+          <th>Suggested Target</th>
+          <th>Confidence</th>
+          <th>Final Target</th>
+        </tr>
+      </thead>
+      <tbody id="mappingBody"></tbody>
+    </table>
+
+    <div id="validationPanel" style="display:none; margin-top: 20px; border-top: 1px solid #eee; padding-top: 16px;">
+      <div id="validationSummary" class="summary-line"></div>
+      <table id="issuesTable">
+        <thead>
+          <tr>
+            <th>Row</th>
+            <th>Field</th>
+            <th>Rule</th>
+            <th>Severity</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="issuesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="status" id="exportStatus"></div>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    let lastFile = null;
+    let lastSheet = null;
+    let lastHeaderRow = null;
+    let targetFieldOptions = [];
+    let lastBlockingCount = 0;
+
+    async function loadTargetSchema() {
+      const res = await fetch(`${API_BASE}/target-schema`);
+      targetFieldOptions = await res.json();
+    }
+
+    function confidenceBadge(confidence) {
+      let cls = "low";
+      if (confidence >= 90) cls = "high";
+      else if (confidence >= 60) cls = "mid";
+      return `<span class="badge ${cls}">${confidence.toFixed(1)}%</span>`;
+    }
+
+    function buildTargetSelect(selectedValue) {
+      const options = ['<option value="">-- unmapped --</option>']
+        .concat(targetFieldOptions.map(tf => {
+          const sel = tf.name === selectedValue ? "selected" : "";
+          const req = tf.required ? " *" : "";
+          return `<option value="${tf.name}" ${sel}>${tf.name}${req}</option>`;
+        }));
+      return `<select class="target-select">${options.join("")}</select>`;
+    }
+
+    function collectMapping() {
+      const rows = document.querySelectorAll("#mappingBody tr");
+      const mapping = [];
+      rows.forEach(row => {
+        const sourceColumn = row.dataset.sourceColumn;
+        const targetField = row.querySelector(".target-select").value;
+        if (targetField) {
+          mapping.push({ source_column: sourceColumn, target_field: targetField });
+        }
+      });
+      return mapping;
+    }
+
+    document.getElementById("analyzeBtn").addEventListener("click", async () => {
+      const fileInput = document.getElementById("fileInput");
+      const statusEl = document.getElementById("uploadStatus");
+      if (!fileInput.files.length) {
+        statusEl.textContent = "Choose a file first.";
+        statusEl.className = "status error";
+        return;
+      }
+      lastFile = fileInput.files[0];
+      statusEl.textContent = "Analyzing...";
+      statusEl.className = "status";
+      document.getElementById("validationPanel").style.display = "none";
+
+      try {
+        if (targetFieldOptions.length === 0) await loadTargetSchema();
+
+        const formData = new FormData();
+        formData.append("file", lastFile);
+
+        const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
+        if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+        const data = await res.json();
+
+        lastSheet = data.ingestion.chosen_sheet;
+        lastHeaderRow = data.ingestion.header_row_index;
+
+        document.getElementById("fileNameLabel").textContent = data.filename;
+        document.getElementById("metaLabel").textContent =
+          ` — sheet "${lastSheet}", header row ${lastHeaderRow}, ${data.ingestion.row_count} data rows`;
+
+        const body = document.getElementById("mappingBody");
+        body.innerHTML = "";
+
+        data.mapping_suggestions.forEach(s => {
+          const tr = document.createElement("tr");
+          const colProfile = data.ingestion.columns.find(c => c.name === s.source_column);
+          const samples = colProfile ? colProfile.sample_values.join(", ") : "";
+
+          const altLine = (s.alternatives && s.alternatives.length)
+            ? `<div class="samples">alt: ${s.alternatives.map(a => `${a.target_field} (${a.confidence}%${a.source ? ", " + a.source : ""})`).join("; ")}</div>`
+            : "";
+
+          tr.innerHTML = `
+        <td>${s.source_column}</td>
+        <td class="samples">${samples}</td>
+        <td>
+          ${s.target_field ?? "<em>none</em>"}
+          <div class="method">${s.method}${s.evidence ? " — " + s.evidence : ""}</div>
+          ${altLine}
+        </td>
+        <td>${confidenceBadge(s.confidence)}</td>
+        <td>${buildTargetSelect(s.target_field)}</td>
+      `;
+          tr.dataset.sourceColumn = s.source_column;
+          body.appendChild(tr);
+        });
+
+        document.getElementById("resultsPanel").style.display = "block";
+        statusEl.textContent = "";
+      } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.className = "status error";
+      }
+    });
+
+    document.getElementById("validateBtn").addEventListener("click", async () => {
+      const statusEl = document.getElementById("exportStatus");
+      if (!lastFile) return;
+
+      const mapping = collectMapping();
+      statusEl.textContent = "Validating...";
+      statusEl.className = "status";
+
+      try {
+        const formData = new FormData();
+        formData.append("file", lastFile);
+        formData.append("sheet_name", lastSheet);
+        formData.append("header_row", lastHeaderRow);
+        formData.append("mapping_json", JSON.stringify(mapping));
+
+        const res = await fetch(`${API_BASE}/validate`, { method: "POST", body: formData });
+        if (!res.ok) throw new Error(`Validation failed (${res.status})`);
+        const data = await res.json();
+
+        lastBlockingCount = data.blocking_count;
+
+        document.getElementById("validationSummary").innerHTML =
+          `${data.row_count} rows checked — ` +
+          `<span class="sev-blocking">${data.blocking_count} blocking</span> &nbsp; ` +
+          `<span class="sev-warning">${data.warning_count} warning</span>`;
+
+        const issuesBody = document.getElementById("issuesBody");
+        issuesBody.innerHTML = "";
+        data.issues.slice(0, 200).forEach(issue => {
+          const tr = document.createElement("tr");
+          const sevClass = issue.severity === "blocking" ? "sev-blocking" : "sev-warning";
+          tr.innerHTML = `
+        <td>${issue.row_index}</td>
+        <td>${issue.target_field}</td>
+        <td>${issue.rule_violated}</td>
+        <td><span class="${sevClass}">${issue.severity}</span></td>
+        <td>${issue.message}</td>
+      `;
+          issuesBody.appendChild(tr);
+        });
+
+        document.getElementById("validationPanel").style.display = "block";
+        statusEl.textContent = "";
+      } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.className = "status error";
+      }
+    });
+
+    document.getElementById("exportBtn").addEventListener("click", async () => {
+      const statusEl = document.getElementById("exportStatus");
+      if (!lastFile) return;
+
+      if (lastBlockingCount > 0) {
+        const proceed = confirm(
+          `There are ${lastBlockingCount} blocking validation issue(s). Export anyway?`
+        );
+        if (!proceed) return;
+      }
+
+      const mapping = collectMapping();
+      statusEl.textContent = "Exporting...";
+      statusEl.className = "status";
+
+      try {
+        const formData = new FormData();
+        formData.append("file", lastFile);
+        formData.append("sheet_name", lastSheet);
+        formData.append("header_row", lastHeaderRow);
+        formData.append("mapping_json", JSON.stringify(mapping));
+
+        const res = await fetch(`${API_BASE}/export`, { method: "POST", body: formData });
+
+        const contentType = res.headers.get("content-type") || "";
+        if (!res.ok || contentType.includes("application/json")) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Export failed (${res.status})`);
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "mapped_output.xlsx";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        statusEl.textContent = "Downloaded.";
+      } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.className = "status error";
+      }
+    });
+
+    loadTargetSchema();
+  </script>
+
+</body>
+
+</html>
