@@ -1,9 +1,21 @@
 """
 Hybrid mapping: runs the deterministic mapper first (fast, free), and
 only calls the AI mapper for columns where deterministic confidence is
-below the threshold or unresolved. Whichever method scores higher wins
-as the primary suggestion; the other is kept in `alternatives` for
+below AI_TRIGGER_THRESHOLD or unresolved. Whichever method scores higher
+wins as the primary suggestion; the other is kept in `alternatives` for
 transparency in the review UI.
+
+Every suggestion also gets a `status`:
+  auto_mapped   -- confidence >= HIGH_CONFIDENCE_THRESHOLD, pre-accepted
+  needs_review  -- confidence >= LOW_CONFIDENCE_THRESHOLD, shown but NOT
+                   auto-included in the export mapping until a human
+                   explicitly accepts it
+  unresolved    -- confidence below LOW_CONFIDENCE_THRESHOLD, or no
+                   target at all; must be chosen manually
+
+This status (not just the raw confidence number) is what the frontend
+uses to decide whether a mapping is pre-accepted or requires a click --
+that's the fix for weak guesses silently occupying a required target.
 """
 
 from __future__ import annotations
@@ -11,8 +23,17 @@ from __future__ import annotations
 from app.target_schema import TargetField
 from app.deterministic_mapper import map_columns
 from app import ai_mapper
+from app.config import HIGH_CONFIDENCE_THRESHOLD, LOW_CONFIDENCE_THRESHOLD, AI_TRIGGER_THRESHOLD
 
-AI_TRIGGER_THRESHOLD = 75.0  # deterministic confidence below this triggers an AI check
+
+def _status_for(confidence: float, target_field: str | None) -> str:
+    if not target_field:
+        return "unresolved"
+    if confidence >= HIGH_CONFIDENCE_THRESHOLD:
+        return "auto_mapped"
+    if confidence >= LOW_CONFIDENCE_THRESHOLD:
+        return "needs_review"
+    return "unresolved"
 
 
 def build_hybrid_suggestions(
@@ -52,6 +73,7 @@ def build_hybrid_suggestions(
                     "source": other_label,
                 }
             ]
+        result["status"] = _status_for(result["confidence"], result["target_field"])
         final_suggestions.append(result)
 
     return {
