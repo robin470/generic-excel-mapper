@@ -1,28 +1,31 @@
 """
-MVP entrypoint. No DB yet -- upload a file, get back profiled columns and
-hybrid (deterministic + AI) mapping suggestions; validate runs
-transformation + business-rule checks; export applies the finalized
-mapping and returns a real target-shaped .xlsx. Run with:
+MVP entrypoint. Templates are now DB-backed (SQLite) -- everything else
+in the pipeline (ingestion, hybrid mapping, transform, validate, export)
+is still stateless per-request, just fed by whichever template the
+caller specifies. Run with:
 
     uvicorn app.main:app --reload
 
-Then open http://127.0.0.1:8000/docs to try it via Swagger UI, or open
-frontend/index.html (served, not double-clicked -- see README note on
-CORS/downloads) in a browser.
+Then open http://127.0.0.1:8000/docs, or the frontend pages:
+  frontend/templates.html -- manage templates
+  frontend/index.html     -- upload + map + validate + export
 """
 
 import json
 import io
 
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 import pandas as pd
 
+from app.database import Base, engine, SessionLocal, get_db
 from app.excel_ingest import ingest
 from app.hybrid_mapper import build_hybrid_suggestions
-from app.target_schema import get_target_fields
 from app.run_pipeline import run_pipeline
+from app.templates_api import router as templates_router
+from app.template_service import get_target_fields_for_template, seed_default_template
 
 app = FastAPI(title="Generic Excel Mapper - MVP")
 
@@ -33,29 +36,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(templates_router, prefix="/templates", tags=["templates"])
+
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        seed_default_template(db)
+    finally:
+        db.close()
+
 
 @app.get("/target-schema")
-def target_schema():
-    """Expose the target template fields, e.g. for a frontend to render."""
-    return [
-        {
-            "name": f.name,
-            "description": f.description,
-            "data_type": f.data_type,
-            "required": f.required,
-        }
-        for f in get_target_fields()
-    ]
+def target_schema(template_id: str | None = Query(default=None), db: Session = Depends(get_db)):
+    """Expose a template's fields, e.g. for a frontend dropdown. Defaults
+    to the current active template if template_id is omitted."""
+    template, fields = get_target_fields_for_template(db, template_id)
+    return {
+        "template_id": template.id,
+        "template_name": template.name,
+        "template_version": template.version,
+        "fields": [
+            {"name": f.name, "description": f.description, "data_type": f.data_type, "required": f.required}
+            for f in fields
+        ],
+    }
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...), sheet_name: str | None = Query(default=None)):
+async def upload(
+    file: UploadFile = File(...),
+    sheet_name: str | None = Query(default=None),
+    template_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
     """
     Upload an Excel file and get back:
       - detected sheets / header row
       - profiled columns (inferred type, samples, null rate)
-      - hybrid (deterministic + AI) mapping suggestions, each tagged with
-        a status: auto_mapped / needs_review / unresolved
+      - hybrid (deterministic + AI) mapping suggestions against the
+        chosen (or default active) template, each tagged with a status:
+        auto_mapped / needs_review / unresolved
     """
     file_bytes = await file.read()
 
@@ -65,11 +88,13 @@ async def upload(file: UploadFile = File(...), sheet_name: str | None = Query(de
         for c in ingestion_result["columns"]
     ]
 
-    target_fields = get_target_fields()
+    template, target_fields = get_target_fields_for_template(db, template_id)
     hybrid_result = build_hybrid_suggestions(columns_for_matching, target_fields)
 
     return {
         "filename": file.filename,
+        "template_id": template.id,
+        "template_name": template.name,
         "ingestion": ingestion_result,
         "ai_available": hybrid_result["ai_available"],
         "mapping_suggestions": hybrid_result["suggestions"],
@@ -82,15 +107,12 @@ async def validate(
     sheet_name: str = Form(...),
     header_row: int = Form(...),
     mapping_json: str = Form(...),
+    template_id: str | None = Form(default=None),
+    db: Session = Depends(get_db),
 ):
-    """
-    Applies the mapping, runs transformation then validation, and returns
-    a run summary + full issue list (each issue tagged with its stage:
-    "transformation" or "validation") for the review UI.
-    """
     file_bytes = await file.read()
     mapping = json.loads(mapping_json)
-    target_fields = get_target_fields()
+    _, target_fields = get_target_fields_for_template(db, template_id)
 
     result = run_pipeline(file_bytes, sheet_name, header_row, mapping, target_fields)
 
@@ -106,11 +128,12 @@ async def validate_report(
     sheet_name: str = Form(...),
     header_row: int = Form(...),
     mapping_json: str = Form(...),
+    template_id: str | None = Form(default=None),
+    db: Session = Depends(get_db),
 ):
-    """Same computation as /validate, returned as a downloadable CSV."""
     file_bytes = await file.read()
     mapping = json.loads(mapping_json)
-    target_fields = get_target_fields()
+    _, target_fields = get_target_fields_for_template(db, template_id)
 
     result = run_pipeline(file_bytes, sheet_name, header_row, mapping, target_fields)
     issues_df = pd.DataFrame([i.to_dict() for i in result["issues"]])
@@ -136,24 +159,21 @@ async def export(
     sheet_name: str = Form(...),
     header_row: int = Form(...),
     mapping_json: str = Form(...),
+    template_id: str | None = Form(default=None),
     skip_invalid_rows: bool = Form(default=False),
     save_as_profile: bool = Form(default=False),
     approve_for_learning: bool = Form(default=False),
+    db: Session = Depends(get_db),
 ):
     """
-    Re-reads the source file (kept stateless -- no server-side storage
-    yet), applies the finalized mapping, transforms, optionally drops
-    rows with blocking issues, and returns a downloadable .xlsx.
-
-    save_as_profile / approve_for_learning are accepted so the frontend
-    can present the full "final run" screen your spec calls for, but
-    NEITHER IS PERSISTED YET -- that requires the DB layer (models.py),
-    which this MVP intentionally doesn't wire up. They're no-ops for now,
-    not silently-faked behavior.
+    save_as_profile / approve_for_learning are accepted for the frontend's
+    final-summary screen but NOT PERSISTED -- that needs the mapping-run /
+    profile tables from models.py, which aren't wired up yet. No-ops, not
+    faked behavior.
     """
     file_bytes = await file.read()
     mapping = json.loads(mapping_json)
-    target_fields = get_target_fields()
+    _, target_fields = get_target_fields_for_template(db, template_id)
 
     result = run_pipeline(file_bytes, sheet_name, header_row, mapping, target_fields)
     output_df = result["transformed_df"]
@@ -165,8 +185,6 @@ async def export(
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         output_df.to_excel(writer, index=False, sheet_name="Mapped Output")
     buffer.seek(0)
-
-    # save_as_profile / approve_for_learning intentionally unused -- see docstring.
 
     return StreamingResponse(
         buffer,

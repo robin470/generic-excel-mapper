@@ -6,3 +6,4 @@ openpyxl
 rapidfuzz
 sentence-transformers
 numpy
+sqlalchemy

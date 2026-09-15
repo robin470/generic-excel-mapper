@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Template Management</title>
+    <style>
+        body {
+            font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+            margin: 0;
+            padding: 32px;
+            background: #f6f7f9;
+            color: #1a1a1a;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        h2 {
+            font-size: 15px;
+            margin: 0 0 12px;
+        }
+
+        .sub {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .nav a {
+            font-size: 13px;
+            color: #333;
+            margin-right: 16px;
+        }
+
+        .panel {
+            background: white;
+            border: 1px solid #e3e3e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: #2b2b2b;
+            color: white;
+            border: none;
+            padding: 7px 13px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        button.secondary {
+            background: #eee;
+            color: #333;
+        }
+
+        button.secondary:hover {
+            background: #ddd;
+        }
+
+        button.danger {
+            background: #fbdada;
+            color: #a11d1d;
+        }
+
+        button.danger:hover {
+            background: #f5c6c6;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 7px 9px;
+            border-bottom: 1px solid #eee;
+            vertical-align: middle;
+        }
+
+        th {
+            color: #666;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+
+        input[type=text],
+        input[type=number],
+        select {
+            padding: 5px 7px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 12px;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-draft {
+            background: #eee;
+            color: #555;
+        }
+
+        .status-active {
+            background: #d7f5df;
+            color: #1a7d3a;
+        }
+
+        .status-retired {
+            background: #f0f0f0;
+            color: #999;
+        }
+
+        .field-form {
+            display: grid;
+            grid-template-columns: 1.3fr 1fr 0.6fr 0.6fr 0.6fr 1.2fr auto;
+            gap: 6px;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .field-form input,
+        .field-form select {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .checkbox-cell {
+            text-align: center;
+        }
+
+        .designer-title {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .designer-title input {
+            font-size: 16px;
+            font-weight: 600;
+            padding: 4px 8px;
+        }
+
+        .status {
+            font-size: 13px;
+            color: #555;
+            margin-top: 10px;
+        }
+
+        .error {
+            color: #a11d1d;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="nav"><a href="index.html">← Back to Mapper</a></div>
+    <h1>Template Management</h1>
+    <div class="sub">All available target templates. Create one, add fields, then save a version to make it usable in
+        the mapper.</div>
+
+    <div class="panel">
+        <h2>Templates</h2>
+        <button id="newTemplateBtn">+ New Template</button>
+        <table id="templatesTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Fields</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="templatesBody"></tbody>
+        </table>
+    </div>
+
+    <div class="panel" id="designerPanel" style="display:none;">
+        <h2>Template Designer</h2>
+        <div class="designer-title">
+            <input type="text" id="templateNameInput" />
+            <button id="renameBtn" class="secondary">Rename</button>
+            <span class="status-badge" id="designerStatusBadge"></span>
+        </div>
+
+        <table id="fieldsTable">
+            <thead>
+                <tr>
+                    <th>Field Name</th>
+                    <th>Data Type</th>
+                    <th>Primary Key</th>
+                    <th>Mandatory</th>
+                    <th>Max Length</th>
+                    <th>Aliases</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="fieldsBody"></tbody>
+        </table>
+
+        <div id="addFieldRow" class="field-form">
+            <input type="text" id="newFieldName" placeholder="field_name" />
+            <select id="newFieldType">
+                <option value="string">string</option>
+                <option value="numeric">numeric</option>
+                <option value="integer">integer</option>
+                <option value="decimal">decimal</option>
+                <option value="email">email</option>
+                <option value="date">date</option>
+                <option value="boolean">boolean</option>
+            </select>
+            <div class="checkbox-cell"><input type="checkbox" id="newFieldPk" /></div>
+            <div class="checkbox-cell"><input type="checkbox" id="newFieldRequired" /></div>
+            <input type="number" id="newFieldMaxLength" placeholder="max length" />
+            <input type="text" id="newFieldAliases" placeholder="aliases, comma, separated" />
+            <button id="addFieldBtn">Add Field</button>
+        </div>
+
+        <div style="margin-top:18px; border-top:1px solid #eee; padding-top:14px;">
+            <button id="saveVersionBtn">Save Version (Publish)</button>
+            <span class="sub">Locks this as the active version for its name; further edits need "New Version".</span>
+        </div>
+        <div class="status" id="designerStatus"></div>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000";
+        let currentTemplate = null;
+
+        async function fetchJson(url, options) {
+            const res = await fetch(url, options);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Request failed (${res.status})`);
+            }
+            return res.json();
+        }
+
+        async function loadTemplates() {
+            const templates = await fetchJson(`${API_BASE}/templates`);
+            const body = document.getElementById("templatesBody");
+            body.innerHTML = "";
+
+            templates.forEach(t => {
+                const tr = document.createElement("tr");
+                const actions = [];
+                if (t.status === "draft") {
+                    actions.push(`<button class="secondary" data-action="edit" data-id="${t.id}">Edit</button>`);
+                    actions.push(`<button class="danger" data-action="delete" data-id="${t.id}">Delete</button>`);
+                } else {
+                    actions.push(`<button class="secondary" data-action="new-version" data-id="${t.id}">New Version</button>`);
+                    actions.push(`<button class="secondary" data-action="view" data-id="${t.id}">View</button>`);
+                }
+                tr.innerHTML = `
+      <td>${t.name}</td>
+      <td>v${t.version}</td>
+      <td><span class="status-badge status-${t.status}">${t.status}</span></td>
+      <td>${t.field_count}</td>
+      <td>${actions.join(" ")}</td>
+    `;
+                body.appendChild(tr);
+            });
+        }
+
+        document.getElementById("templatesBody").addEventListener("click", async (e) => {
+            const btn = e.target.closest("button[data-action]");
+            if (!btn) return;
+            const id = btn.dataset.id;
+
+            try {
+                if (btn.dataset.action === "edit" || btn.dataset.action === "view") {
+                    await openDesigner(id);
+                } else if (btn.dataset.action === "delete") {
+                    if (!confirm("Delete this draft template?")) return;
+                    await fetchJson(`${API_BASE}/templates/${id}`, { method: "DELETE" });
+                    await loadTemplates();
+                } else if (btn.dataset.action === "new-version") {
+                    const clone = await fetchJson(`${API_BASE}/templates/${id}/new-version`, { method: "POST" });
+                    await loadTemplates();
+                    await openDesigner(clone.id);
+                }
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("newTemplateBtn").addEventListener("click", async () => {
+            const name = prompt("Template name:");
+            if (!name) return;
+            try {
+                const template = await fetchJson(`${API_BASE}/templates`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name }),
+                });
+                await loadTemplates();
+                await openDesigner(template.id);
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        async function openDesigner(id) {
+            currentTemplate = await fetchJson(`${API_BASE}/templates/${id}`);
+            renderDesigner();
+            document.getElementById("designerPanel").style.display = "block";
+        }
+
+        function renderDesigner() {
+            const t = currentTemplate;
+            document.getElementById("templateNameInput").value = t.name;
+            document.getElementById("designerStatusBadge").className = `status-badge status-${t.status}`;
+            document.getElementById("designerStatusBadge").textContent = `${t.status} · v${t.version}`;
+
+            const isDraft = t.status === "draft";
+            document.getElementById("renameBtn").disabled = !isDraft;
+            document.getElementById("addFieldRow").style.display = isDraft ? "grid" : "none";
+            document.getElementById("saveVersionBtn").style.display = isDraft ? "inline-block" : "none";
+
+            const body = document.getElementById("fieldsBody");
+            body.innerHTML = "";
+            t.fields.forEach(f => {
+                const tr = document.createElement("tr");
+                const actionCell = isDraft
+                    ? `<button class="danger" data-action="delete-field" data-id="${f.id}">Delete</button>`
+                    : "";
+                tr.innerHTML = `
+      <td>${f.name}</td>
+      <td>${f.data_type}</td>
+      <td class="checkbox-cell">${f.is_primary_key ? "✓" : ""}</td>
+      <td class="checkbox-cell">${f.required ? "✓" : ""}</td>
+      <td>${f.max_length ?? ""}</td>
+      <td>${(f.aliases || []).join(", ")}</td>
+      <td>${actionCell}</td>
+    `;
+                body.appendChild(tr);
+            });
+        }
+
+        document.getElementById("fieldsBody").addEventListener("click", async (e) => {
+            const btn = e.target.closest("button[data-action='delete-field']");
+            if (!btn) return;
+            try {
+                currentTemplate = await fetchJson(
+                    `${API_BASE}/templates/${currentTemplate.id}/fields/${btn.dataset.id}`,
+                    { method: "DELETE" }
+                );
+                renderDesigner();
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("renameBtn").addEventListener("click", async () => {
+            const name = document.getElementById("templateNameInput").value.trim();
+            if (!name) return;
+            try {
+                currentTemplate = await fetchJson(`${API_BASE}/templates/${currentTemplate.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name }),
+                });
+                renderDesigner();
+                await loadTemplates();
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("addFieldBtn").addEventListener("click", async () => {
+            const name = document.getElementById("newFieldName").value.trim();
+            if (!name) { alert("Field name is required."); return; }
+
+            const payload = {
+                name,
+                data_type: document.getElementById("newFieldType").value,
+                is_primary_key: document.getElementById("newFieldPk").checked,
+                required: document.getElementById("newFieldRequired").checked,
+                max_length: document.getElementById("newFieldMaxLength").value
+                    ? parseInt(document.getElementById("newFieldMaxLength").value, 10) : null,
+                aliases: document.getElementById("newFieldAliases").value
+                    .split(",").map(a => a.trim()).filter(Boolean),
+            };
+
+            try {
+                currentTemplate = await fetchJson(`${API_BASE}/templates/${currentTemplate.id}/fields`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                renderDesigner();
+                document.getElementById("newFieldName").value = "";
+                document.getElementById("newFieldMaxLength").value = "";
+                document.getElementById("newFieldAliases").value = "";
+                document.getElementById("newFieldPk").checked = false;
+                document.getElementById("newFieldRequired").checked = false;
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("saveVersionBtn").addEventListener("click", async () => {
+            const statusEl = document.getElementById("designerStatus");
+            try {
+                currentTemplate = await fetchJson(`${API_BASE}/templates/${currentTemplate.id}/publish`, { method: "POST" });
+                renderDesigner();
+                await loadTemplates();
+                statusEl.textContent = "Published — this version is now active.";
+                statusEl.className = "status";
+            } catch (err) {
+                statusEl.textContent = err.message;
+                statusEl.className = "status error";
+            }
+        });
+
+        loadTemplates();
+    </script>
+
+</body>
+
+</html>

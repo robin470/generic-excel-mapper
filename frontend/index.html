@@ -254,11 +254,16 @@
 
 <body>
 
+  <div class="nav" style="margin-bottom:8px;"><a href="templates.html">Manage Templates →</a></div>
   <h1>Generic Excel Mapper — Dashboard</h1>
   <div class="sub">Upload a source file → review the hybrid (deterministic + AI) mapping → validate → export.</div>
 
   <div class="panel">
     <h2>1. Upload</h2>
+    <label style="font-size:13px; display:block; margin-bottom:8px;">
+      Target Template:
+      <select id="templateSelect" style="margin-left:6px;"></select>
+    </label>
     <input type="file" id="fileInput" accept=".xlsx,.xls" />
     <button id="analyzeBtn">Analyze</button>
     <div class="status" id="uploadStatus"></div>
@@ -345,14 +350,34 @@
     let lastHeaderRow = null;
     let targetFieldOptions = [];
     let currentSuggestions = []; // one entry per source column: {source_column, target_field, confidence, method, status, evidence, alternatives, accepted}
+    let selectedTemplateId = null;
 
     function statusLabel(status) {
       return { auto_mapped: "Auto-mapped", needs_review: "Needs Review", unresolved: "Unresolved" }[status] || status;
     }
 
+    async function loadActiveTemplates() {
+      const res = await fetch(`${API_BASE}/templates?status=active`);
+      const templates = await res.json();
+      const select = document.getElementById("templateSelect");
+      select.innerHTML = templates.map(t => `<option value="${t.id}">${t.name} (v${t.version})</option>`).join("");
+      if (templates.length) {
+        selectedTemplateId = templates[0].id;
+      }
+      select.addEventListener("change", () => {
+        selectedTemplateId = select.value;
+        targetFieldOptions = []; // force reload for the new template
+      });
+    }
+
     async function loadTargetSchema() {
-      const res = await fetch(`${API_BASE}/target-schema`);
-      targetFieldOptions = await res.json();
+      const url = selectedTemplateId
+        ? `${API_BASE}/target-schema?template_id=${selectedTemplateId}`
+        : `${API_BASE}/target-schema`;
+      const res = await fetch(url);
+      const data = await res.json();
+      targetFieldOptions = data.fields;
+      if (!selectedTemplateId) selectedTemplateId = data.template_id;
     }
 
     function confidenceBadge(confidence) {
@@ -473,7 +498,10 @@
         const formData = new FormData();
         formData.append("file", lastFile);
 
-        const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
+        const uploadUrl = selectedTemplateId
+          ? `${API_BASE}/upload?template_id=${selectedTemplateId}`
+          : `${API_BASE}/upload`;
+        const res = await fetch(uploadUrl, { method: "POST", body: formData });
         if (!res.ok) throw new Error(`Upload failed (${res.status})`);
         const data = await res.json();
 
@@ -517,6 +545,7 @@
       formData.append("sheet_name", lastSheet);
       formData.append("header_row", lastHeaderRow);
       formData.append("mapping_json", JSON.stringify(mapping));
+      if (selectedTemplateId) formData.append("template_id", selectedTemplateId);
       return formData;
     }
 
@@ -611,7 +640,7 @@
       }
     });
 
-    loadTargetSchema();
+    loadActiveTemplates().then(loadTargetSchema);
   </script>
 
 </body>

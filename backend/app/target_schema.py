@@ -1,9 +1,9 @@
 """
-Hardcoded target template for the MVP.
-
-Later this gets replaced by TargetTemplate/TargetField rows from the DB
-(see models.py). Keeping the same shape here means swapping it out later
-is a data-source change, not a logic change.
+Shared TargetField shape used throughout the pipeline (mapper,
+transformer, validator, exporter) regardless of where it came from.
+Templates now live in the DB (see db_models.py / templates_api.py) --
+SEED_TARGET_FIELDS below exists only to seed a default template the
+first time the app runs, so the app isn't empty on a fresh install.
 """
 
 from dataclasses import dataclass, field
@@ -23,8 +23,7 @@ class TargetField:
     max_length: int | None = None
 
 
-# Example target template: adjust to whatever schema your assignment/sample data uses.
-TARGET_FIELDS: list[TargetField] = [
+SEED_TARGET_FIELDS: list[TargetField] = [
     TargetField(
         name="customer_id",
         description="Unique customer identifier",
@@ -71,7 +70,3 @@ TARGET_FIELDS: list[TargetField] = [
         required=False,
     ),
 ]
-
-
-def get_target_fields() -> list[TargetField]:
-    return TARGET_FIELDS
